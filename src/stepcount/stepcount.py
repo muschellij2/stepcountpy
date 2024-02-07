@@ -33,6 +33,8 @@ def main():
                         choices=['ssl', 'rf'], default='ssl')
     parser.add_argument("--pytorch-device", "-d", help="Pytorch device to use, e.g.: 'cpu' or 'cuda:0' (for SSL only)",
                         type=str, default='cpu')
+    parser.add_argument("--sample-rate", "-r", help="Sample rate for measurement, otherwise inferred.",
+                        type=int, default=None)    
     parser.add_argument('--quiet', '-q', action='store_true', help='Suppress output')
     args = parser.parse_args()
 
@@ -45,7 +47,7 @@ def main():
         resample_hz = 30
     else:
         resample_hz = None
-    data, info = read(args.filepath, resample_hz, verbose=verbose)
+    data, info = read(args.filepath, resample_hz, sample_rate=args.sample_rate, verbose=verbose)
 
     # Output paths
     basename = resolve_path(args.filepath)[1]
@@ -328,11 +330,13 @@ def nanint(x):
     return int(x)
 
 
-def read(filepath, resample_hz='uniform', verbose=True):
+def read(filepath, resample_hz='uniform', sample_rate=None, verbose=True):
 
     p = pathlib.Path(filepath)
-    ftype = p.suffixes[0].lower()
     fsize = round(p.stat().st_size / (1024 * 1024), 1)
+    ftype = p.suffix.lower()
+    if ftype in (".gz", ".xz", ".lzma", ".bz2", ".zip"):  # if file is compressed, check the next extension
+        ftype = pathlib.Path(p.stem).suffix.lower()
 
     if ftype in (".csv", ".pkl"):
 
@@ -349,8 +353,9 @@ def read(filepath, resample_hz='uniform', verbose=True):
         else:
             raise ValueError(f"Unknown file format: {ftype}")
 
-        freq = infer_freq(data.index)
-        sample_rate = int(np.round(pd.Timedelta('1s') / freq))
+        if sample_rate in (None, False):
+            freq = infer_freq(data.index)
+            sample_rate = int(np.round(pd.Timedelta('1s') / freq))
 
         # Quick fix: Drop duplicate indices. TODO: Maybe should be handled by actipy.
         data = data[~data.index.duplicated(keep='first')]
@@ -382,6 +387,9 @@ def read(filepath, resample_hz='uniform', verbose=True):
             resample_hz=resample_hz,
             verbose=verbose,
         )
+
+    else:
+        raise ValueError(f"Unknown file format: {ftype}")
 
     if 'ResampleRate' not in info:
         info['ResampleRate'] = info['SampleRate']
